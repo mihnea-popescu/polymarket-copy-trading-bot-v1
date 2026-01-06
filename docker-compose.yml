@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: polymarket-bot-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: polymarket_copytrading
+    networks:
+      - polymarket-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polymarket-bot-app
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      USER_ADDRESS: ${USER_ADDRESS}
+      PROXY_WALLET: ${PROXY_WALLET}
+      PRIVATE_KEY: ${PRIVATE_KEY}
+      CLOB_HTTP_URL: ${CLOB_HTTP_URL:-https://clob.polymarket.com/}
+      CLOB_WS_URL: ${CLOB_WS_URL:-wss://ws-subscriptions-clob.polymarket.com/ws}
+      FETCH_INTERVAL: ${FETCH_INTERVAL:-1}
+      TOO_OLD_TIMESTAMP: ${TOO_OLD_TIMESTAMP:-24}
+      RETRY_LIMIT: ${RETRY_LIMIT:-3}
+      MONGO_URI: mongodb://mongodb:27017/polymarket_copytrading
+      RPC_URL: ${RPC_URL}
+      USDC_CONTRACT_ADDRESS: ${USDC_CONTRACT_ADDRESS}
+    networks:
+      - polymarket-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  polymarket-network:
+    driver: bridge
+
