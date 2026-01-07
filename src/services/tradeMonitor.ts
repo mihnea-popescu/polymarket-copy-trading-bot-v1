@@ -22,7 +22,35 @@ const init = async () => {
 };
 
 const fetchTradeData = async () => {
-
+    try {
+        const activities: UserActivityInterface[] = await fetchData(
+            `https://data-api.polymarket.com/activity?user=${USER_ADDRESS}`
+        );
+        
+        const now = moment().unix();
+        const tooOldTimestamp = now - TOO_OLD_TIMESTAMP * 3600;
+        
+        for (const activity of activities) {
+            if (activity.type === 'TRADE' && activity.timestamp > tooOldTimestamp) {
+                const existingTrade = await UserActivity.findOne({
+                    transactionHash: activity.transactionHash,
+                }).exec();
+                
+                if (!existingTrade) {
+                    const newTrade = new UserActivity({
+                        ...activity,
+                        proxyWallet: USER_ADDRESS,
+                        bot: false,
+                        botExcutedTime: 0,
+                    });
+                    await newTrade.save();
+                    console.log('New trade detected:', activity.transactionHash);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error fetching trade data:', error);
+    }
 };
 
 const tradeMonitor = async () => {

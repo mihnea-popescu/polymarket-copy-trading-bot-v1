@@ -11,6 +11,14 @@ const createClobClient = async (): Promise<ClobClient> => {
     const chainId = 137;
     const host = CLOB_HTTP_URL as string;
     const wallet = new ethers.Wallet(PRIVATE_KEY as string);
+
+    // Debug: Verify wallet addresses match expected values
+    console.log('=== CLOB Client Configuration ===');
+    console.log('Wallet address from PRIVATE_KEY:', wallet.address);
+    console.log('PROXY_WALLET:', PROXY_WALLET);
+    console.log('These should match signer and maker in orders');
+    console.log('===================================');
+
     let clobClient = new ClobClient(
         host,
         chainId,
