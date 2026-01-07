@@ -12,17 +12,29 @@ const RETRY_LIMIT = ENV.RETRY_LIMIT;
 const PROXY_WALLET = ENV.PROXY_WALLET;
 
 let temp_trades: UserActivityInterface[] = [];
+let botStartTimestamp: number | null = null;
 
 const UserActivity = getUserActivityModel(USER_ADDRESS);
 
 const readTempTrade = async () => {
-    temp_trades = (
+    const allTrades = (
         await UserActivity.find({
             $and: [{ type: 'TRADE' }, { bot: false }, { botExcutedTime: { $lt: RETRY_LIMIT } }],
         }).exec()
     )
         .map((trade) => trade as UserActivityInterface)
         .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)); // Sort in decreasing chronological order (newest first)
+    
+    // Only include trades that occurred after the bot started
+    // Both timestamps are Unix timestamps in seconds (timezone-independent)
+    if (botStartTimestamp !== null) {
+        temp_trades = allTrades.filter((trade) => {
+            if (!trade.timestamp) return false;
+            return trade.timestamp >= botStartTimestamp!;
+        });
+    } else {
+        temp_trades = allTrades;
+    }
 };
 
 const doTrading = async (clobClient: ClobClient) => {
@@ -31,6 +43,13 @@ const doTrading = async (clobClient: ClobClient) => {
     
     for (const trade of temp_trades) {
         console.log('Trade to copy:', trade);
+        
+        // Skip trades that occurred before the bot started
+        if (botStartTimestamp !== null && trade.timestamp && trade.timestamp < botStartTimestamp) {
+            console.log(`Trade occurred before bot started (trade timestamp: ${trade.timestamp}, bot start: ${botStartTimestamp}). Skipping.`);
+            await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+            continue;
+        }
         
         // Skip trades older than 5 minutes
         if (trade.timestamp && (now - trade.timestamp) > MAX_AGE_SECONDS) {
@@ -88,7 +107,12 @@ const doTrading = async (clobClient: ClobClient) => {
 };
 
 const tradeExcutor = async (clobClient: ClobClient) => {
+    // Set bot start timestamp when the bot starts
+    // Using Unix timestamp in seconds (timezone-independent, UTC-based)
+    // This matches the format of trade.timestamp from the Polymarket API
+    botStartTimestamp = Math.floor(Date.now() / 1000);
     console.log(`Executing Copy Trading`);
+    console.log(`Bot started at timestamp: ${botStartTimestamp} (will only copy trades after this time)`);
 
     while (true) {
         await readTempTrade();
