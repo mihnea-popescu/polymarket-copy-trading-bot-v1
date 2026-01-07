@@ -3,6 +3,7 @@ import { ENV } from './config/env';
 import createClobClient from './utils/createClobClient';
 import tradeExecutor from './services/tradeExecutor';
 import tradeMonitor from './services/tradeMonitor';
+import positionClaimer from './services/positionClaimer';
 import test from './test/test';
 
 const USER_ADDRESS = ENV.USER_ADDRESS;
@@ -15,6 +16,7 @@ export const main = async () => {
     const clobClient = await createClobClient();
     tradeMonitor();  //Monitor target user's transactions
     tradeExecutor(clobClient);  //Execute transactions on your wallet
+    positionClaimer(clobClient);  //Automatically claim won positions every minute
     // test(clobClient);
 };
 
