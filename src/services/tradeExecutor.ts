@@ -25,7 +25,7 @@ const readTempTrade = async () => {
         .map((trade) => trade as UserActivityInterface)
         .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)); // Sort in decreasing chronological order (newest first)
     
-    // Filter trades: only include those that occurred after bot started and contain "Bitcoin"
+    // Filter trades: only include those that occurred after bot started
     let filteredTrades = allTrades;
     
     // Only include trades that occurred after the bot started
@@ -37,16 +37,21 @@ const readTempTrade = async () => {
         });
     }
     
-    // Only include trades that contain "Bitcoin" in title, name, or outcome
-    temp_trades = filteredTrades.filter((trade) => {
-        const searchText = 'Bitcoin';
-        const title = (trade.title || '').toLowerCase();
-        const name = (trade.name || '').toLowerCase();
-        const outcome = (trade.outcome || '').toLowerCase();
-        const searchLower = searchText.toLowerCase();
-        
-        return title.includes(searchLower) || name.includes(searchLower) || outcome.includes(searchLower);
-    });
+    // Apply trade filter if TRADE_FILTER_TERM is set in environment
+    if (ENV.TRADE_FILTER_TERM) {
+        const searchText = ENV.TRADE_FILTER_TERM;
+        temp_trades = filteredTrades.filter((trade) => {
+            const title = (trade.title || '').toLowerCase();
+            const name = (trade.name || '').toLowerCase();
+            const outcome = (trade.outcome || '').toLowerCase();
+            const searchLower = searchText.toLowerCase();
+            
+            return title.includes(searchLower) || name.includes(searchLower) || outcome.includes(searchLower);
+        });
+    } else {
+        // No filter term set, copy all trades
+        temp_trades = filteredTrades;
+    }
 };
 
 const doTrading = async (clobClient: ClobClient) => {
@@ -56,17 +61,19 @@ const doTrading = async (clobClient: ClobClient) => {
     for (const trade of temp_trades) {
         console.log('Trade to copy:', trade);
         
-        // Skip trades that don't contain "Bitcoin" (safety check)
-        const searchText = 'Bitcoin';
-        const title = (trade.title || '').toLowerCase();
-        const name = (trade.name || '').toLowerCase();
-        const outcome = (trade.outcome || '').toLowerCase();
-        const searchLower = searchText.toLowerCase();
-        
-        if (!title.includes(searchLower) && !name.includes(searchLower) && !outcome.includes(searchLower)) {
-            console.log(`Trade does not contain "Bitcoin". Skipping. (title: ${trade.title}, name: ${trade.name}, outcome: ${trade.outcome})`);
-            await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-            continue;
+        // Skip trades that don't match filter term (safety check)
+        if (ENV.TRADE_FILTER_TERM) {
+            const searchText = ENV.TRADE_FILTER_TERM;
+            const title = (trade.title || '').toLowerCase();
+            const name = (trade.name || '').toLowerCase();
+            const outcome = (trade.outcome || '').toLowerCase();
+            const searchLower = searchText.toLowerCase();
+            
+            if (!title.includes(searchLower) && !name.includes(searchLower) && !outcome.includes(searchLower)) {
+                console.log(`Trade does not contain "${searchText}". Skipping. (title: ${trade.title}, name: ${trade.name}, outcome: ${trade.outcome})`);
+                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                continue;
+            }
         }
         
         // Skip trades that occurred before the bot started
@@ -138,7 +145,11 @@ const tradeExcutor = async (clobClient: ClobClient) => {
     botStartTimestamp = Math.floor(Date.now() / 1000);
     console.log(`Executing Copy Trading`);
     console.log(`Bot started at timestamp: ${botStartTimestamp} (will only copy trades after this time)`);
-    console.log(`Filter: Only copying trades that contain "Bitcoin" in title, name, or outcome`);
+    if (ENV.TRADE_FILTER_TERM) {
+        console.log(`Filter: Only copying trades that contain "${ENV.TRADE_FILTER_TERM}" in title, name, or outcome`);
+    } else {
+        console.log(`Filter: No trade filter set - copying all trades`);
+    }
 
     while (true) {
         await readTempTrade();

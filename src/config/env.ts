@@ -38,4 +38,5 @@ export const ENV = {
     MONGO_URI: process.env.MONGO_URI as string,
     RPC_URL: process.env.RPC_URL as string,
     USDC_CONTRACT_ADDRESS: process.env.USDC_CONTRACT_ADDRESS as string,
+    TRADE_FILTER_TERM: process.env.TRADE_FILTER_TERM || undefined, // Optional: filter trades by term (e.g., "Bitcoin")
 };

@@ -361,6 +361,36 @@ const postOrder = async (
 
             const minAskValue = parseFloat(minPriceAsk.size) * parseFloat(minPriceAsk.price);
             const minAskPrice = parseFloat(minPriceAsk.price);
+
+            // Fetch market info to get the taker fee rate
+            let takerFeeBps: number | undefined;
+            try {
+                const market = await clobClient.getMarket(trade.conditionId);
+                if (market) {
+                    // Try different possible field names for taker fee
+                    takerFeeBps =
+                        (market as any).takerFeeBps ||
+                        (market as any).taker_fee_bps ||
+                        (market as any).takerFee ||
+                        (market as any).taker_fee;
+                    if (takerFeeBps !== undefined) {
+                        console.log(`Market taker fee rate: ${takerFeeBps} basis points`);
+                    }
+                }
+            } catch (marketError: any) {
+                console.log(
+                    `Could not fetch market info for fee rate: ${marketError?.message || 'Unknown error'}`
+                );
+            }
+
+            // If we couldn't get the fee rate from market, use a default or try to extract from error
+            // Based on the error message, the market requires 1000 bps (10%)
+            // We'll try to use the market fee if available, otherwise default to 1000
+            if (takerFeeBps === undefined) {
+                takerFeeBps = 1000; // Default to 1000 bps (10%) as indicated by the error
+                console.log(`Using default taker fee rate: ${takerFeeBps} basis points`);
+            }
+
             let calculatedAmount: number;
 
             if (useFallbackAmount) {
@@ -464,8 +494,10 @@ const postOrder = async (
                 amount: calculatedAmount,
                 price: minAskPrice,
             };
+
             console.log('Order args:', order_arges);
             const signedOrder = await clobClient.createMarketOrder(order_arges);
+
             const resp = await clobClient.postOrder(signedOrder, OrderType.FOK);
             if (resp.success === true) {
                 retry = 0;
@@ -474,6 +506,66 @@ const postOrder = async (
                 console.log('Successfully posted order:', resp);
                 remaining -= order_arges.amount;
             } else {
+                // Check if error is about fee rate
+                const errorMessage = resp.error || (resp as any)?.data?.error || '';
+                const isFeeRateError =
+                    errorMessage.includes('invalid fee rate') || errorMessage.includes('taker fee');
+
+                if (isFeeRateError) {
+                    // Extract the required fee rate from error message
+                    const feeRateMatch =
+                        errorMessage.match(/taker fee[:\s]+(\d+)/i) ||
+                        errorMessage.match(/fee rate.*?(\d+)/i);
+                    if (feeRateMatch && feeRateMatch[1]) {
+                        const requiredFeeRate = parseInt(feeRateMatch[1], 10);
+                        console.log(
+                            `Fee rate error detected. Market requires ${requiredFeeRate} basis points. Retrying with createOrder instead of createMarketOrder...`
+                        );
+
+                        // Try using createOrder with market price and fee rate
+                        // Calculate size from amount and price
+                        const orderSize = calculatedAmount / minAskPrice;
+
+                        try {
+                            const limitOrderArgs: any = {
+                                side: Side.BUY,
+                                tokenID: tokenId,
+                                size: orderSize,
+                                price: minAskPrice,
+                                feeRateBps: requiredFeeRate,
+                            };
+
+                            console.log('Retrying with createOrder:', limitOrderArgs);
+                            const limitSignedOrder = await clobClient.createOrder(limitOrderArgs);
+                            const limitResp = await clobClient.postOrder(
+                                limitSignedOrder,
+                                OrderType.FOK
+                            );
+
+                            if (limitResp.success === true) {
+                                retry = 0;
+                                useFallbackAmount = false;
+                                consecutiveSignatureErrors = 0;
+                                console.log(
+                                    'Successfully posted order using createOrder with fee rate:',
+                                    limitResp
+                                );
+                                remaining -= order_arges.amount;
+                                continue;
+                            } else {
+                                console.log('createOrder also failed:', limitResp);
+                                // Continue with normal error handling below
+                            }
+                        } catch (createOrderError: any) {
+                            console.log(
+                                'Error creating order with fee rate:',
+                                createOrderError?.message || 'Unknown error'
+                            );
+                            // Continue with normal error handling below
+                        }
+                    }
+                }
+
                 const isSignatureError =
                     resp.error === 'invalid signature' ||
                     (resp as any)?.data?.error === 'invalid signature';
